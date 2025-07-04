@@ -1,0 +1,16 @@
+{
+  "plugin.name": "Soft Delete",
+  "plugin.description": "Add a soft delete feature to your Strapi v5 project",
+  "explorer.title": "Soft Delete Explorer",
+  "explorer.description": "View and manage soft deleted entries",
+  "settings.restoration-behavior.title": "Restoration Behavior",
+  "settings.restoration-behavior.description": "Configure how entries are restored from soft delete",
+  "content-types.title": "Content Types",
+  "entries.title": "Soft Deleted Entries",
+  "entries.restore": "Restore",
+  "entries.delete-permanently": "Delete Permanently",
+  "entries.deleted-at": "Deleted At",
+  "entries.deleted-by": "Deleted By",
+  "confirm.restore": "Are you sure you want to restore this entry?",
+  "confirm.delete-permanently": "Are you sure you want to permanently delete this entry? This action cannot be undone."
+}
