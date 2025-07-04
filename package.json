@@ -1,5 +1,5 @@
 {
-  "version": "0.0.0",
+  "version": "1.0.0",
   "keywords": [],
   "type": "commonjs",
   "exports": {
@@ -64,7 +64,7 @@
     "displayName": "Soft Delete",
     "description": "Add a soft delete feature to your Strapi v5 project"
   },
-  "name": "strapi-plugin-soft-delete",
+  "name": "@jmarianski/strapi-plugin-soft-delete",
   "description": "Add a soft delete feature to your Strapi v5 project",
   "license": "MIT",
   "author": "Jacek Mariański <jmarianski@trans.eu>"

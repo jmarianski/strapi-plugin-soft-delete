@@ -64,6 +64,8 @@ module.exports = {
 - The plugin modifies your database schema by adding soft delete fields
 - Once enabled, all delete operations become soft deletes for supported content types
 - Use "Delete Permanently" feature with caution as it cannot be undone
+- Plugin is still a work-in-progress state. Tested locally on draft-publish environments
+- Originally a fork of strapi v4 plugin, but rewritten from scratch in the end
 
 ## 📋 Requirements
 
