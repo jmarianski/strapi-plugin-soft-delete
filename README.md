@@ -36,7 +36,7 @@ A powerful Strapi v5 plugin that adds soft delete functionality to your content 
 Install the plugin via npm:
 
 ```bash
-npm install strapi-plugin-soft-delete
+npm install @jmarianski/strapi-plugin-soft-delete
 ```
 
 Add the plugin to your Strapi configuration in `config/plugins.js` or `config/plugins.ts`:
