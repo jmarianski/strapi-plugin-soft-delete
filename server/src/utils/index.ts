@@ -43,3 +43,9 @@ export const eventHubEmit = (params: {
 
 // Export soft delete status utilities
 export * as SoftDeleteStatus from './soft-delete-status';
+
+// Export database utilities
+export * as Database from './database';
+
+// Export query interceptor
+export { setupQueryInterceptor } from './query-interceptor';

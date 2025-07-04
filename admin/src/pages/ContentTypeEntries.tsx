@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useFetchClient } from '@strapi/strapi/admin';
 import { Main, Box, Typography, Button, Flex } from '@strapi/design-system';
@@ -6,26 +6,23 @@ import { ArrowClockwise, Trash } from '@strapi/icons';
 import { PLUGIN_ID } from '../pluginId';
 import { format } from 'date-fns';
 
-interface Entry {
+interface SoftDeletedEntry {
   id: number;
   documentId?: string;
   publishedAt?: string;
   status?: string;
-  [key: string]: any;
-  _softDeletedAt: string;
-  _softDeletedById: number;
-  _softDeletedByType: string;
+  [key: string]: any; // This will include the soft delete fields dynamically
 }
 
 interface GroupedEntry {
   documentId: string;
-  versions: Entry[];
-  _softDeletedAt: string;
+  versions: SoftDeletedEntry[];
+  [key: string]: any; // This will include the _softDeletedAt field for sorting
 }
 
 export const ContentTypeEntries = () => {
   const { uid } = useParams<{ uid: string }>();
-  const [entries, setEntries] = useState<Entry[] | GroupedEntry[]>([]);
+  const [entries, setEntries] = useState<SoftDeletedEntry[] | GroupedEntry[]>([]);
   const [isGrouped, setIsGrouped] = useState(false);
   const [loading, setLoading] = useState(true);
   const { get, put, del } = useFetchClient();
@@ -92,7 +89,7 @@ export const ContentTypeEntries = () => {
             Versions: {groupedEntry.versions.map((v) => v.status).join(', ')}
           </Typography>
           <Typography variant="epsilon" textColor="neutral600">
-            Deleted: {format(new Date(groupedEntry._softDeletedAt), 'PPpp')}
+            Deleted: {format(new Date(groupedEntry['_softDeletedAt']), 'PPpp')}
           </Typography>
           {groupedEntry.versions.map((version, index) => (
             <Typography key={index} variant="pi" textColor="neutral500">
@@ -123,7 +120,7 @@ export const ContentTypeEntries = () => {
     </Box>
   );
 
-  const renderSingleEntry = (entry: Entry) => (
+  const renderSingleEntry = (entry: SoftDeletedEntry) => (
     <Box key={entry.id} padding={4} background="neutral100" borderRadius="4px" marginBottom={3}>
       <Flex justifyContent="space-between" alignItems="center">
         <Flex gap={2}>
@@ -142,7 +139,7 @@ export const ContentTypeEntries = () => {
             </Typography>
           )}
           <Typography variant="epsilon" textColor="neutral600">
-            Deleted: {entry._softDeletedAt ? format(new Date(entry._softDeletedAt), 'PPpp') : ''}
+            Deleted: {entry['_softDeletedAt'] ? format(new Date(entry['_softDeletedAt']), 'PPpp') : ''}
           </Typography>
           <Typography variant="epsilon" textColor="neutral600">
             By: {entry._softDeletedByType}
@@ -207,7 +204,7 @@ export const ContentTypeEntries = () => {
                     renderGroupedEntry(groupedEntry)
                   )
                 : // Render individual entries (non-draft/publish content types)
-                  (entries as Entry[]).map((entry) => renderSingleEntry(entry))}
+                  (entries as SoftDeletedEntry[]).map((entry) => renderSingleEntry(entry))}
             </Box>
           )}
         </Box>

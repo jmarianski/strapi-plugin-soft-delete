@@ -119,15 +119,12 @@ const statusToFilters: TransformWithContentType = (contentType, params) => {
  */
 const hasSoftDeleteFields = (contentTypeUid: string, strapi: Core.Strapi): boolean => {
   try {
-    const contentType = strapi.contentTypes[contentTypeUid];
-    if (!contentType || !contentType.attributes) {
-      return false;
-    }
-
-    // Check if the schema has the _softDeletedAt field
-    return contentType.attributes._softDeletedAt !== undefined;
+    // Since we're now handling soft delete fields at the database level,
+    // we'll assume supported content types have the fields
+    const { supportsContentType } = require('./plugin');
+    return supportsContentType(contentTypeUid);
   } catch (error) {
-    console.error(`[SOFT DELETE] Error checking schema for ${contentTypeUid}:`, error);
+    console.error(`[SOFT DELETE] Error checking for soft delete support for ${contentTypeUid}:`, error);
     return false;
   }
 };

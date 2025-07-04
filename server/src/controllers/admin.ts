@@ -1,5 +1,6 @@
 import type { Core } from '@strapi/strapi';
 import { supportsContentType } from '../utils/plugin';
+import { getSoftDeleteFields } from '../utils/database';
 
 const admin = ({ strapi }: { strapi: Core.Strapi }) => ({
   async getContentTypes(ctx: any) {
@@ -39,45 +40,48 @@ const admin = ({ strapi }: { strapi: Core.Strapi }) => ({
         return ctx.throw(403, 'Forbidden');
       }
 
-      const entries = await strapi.db.query(uid).findMany({
-        where: {
-          _softDeletedAt: {
-            $notNull: true,
-          },
-        },
-        orderBy: { _softDeletedAt: 'desc' },
-        populate: ctx.query.populate,
-      });
+      // Get the table name for this content type
+      const contentType = strapi.contentTypes[uid];
+      const tableName = contentType.collectionName || contentType.info.singularName;
+      const softDeleteFields = getSoftDeleteFields();
+
+      // Use raw SQL to find soft deleted entries, bypassing schema validation
+      const knex = strapi.db.connection;
+      const entries = await knex(tableName)
+        .whereNotNull(softDeleteFields.deletedAt)
+        .orderBy(softDeleteFields.deletedAt, 'desc');
 
       // Check if this content type supports draft/publish
-      const contentType = strapi.contentTypes[uid];
       const supportsDraftPublish = contentType?.options?.draftAndPublish;
       console.log(
         `Content type ${uid} supports draft/publish: ${supportsDraftPublish}`,
         contentType
       );
+
       if (supportsDraftPublish) {
         // Group entries by documentId for draft/publish content types
         const groupedEntries = new Map();
 
         entries.forEach((entry) => {
-          const docId = entry.documentId || entry.id;
+          const docId = entry.document_id || entry.id;
           if (!groupedEntries.has(docId)) {
             groupedEntries.set(docId, {
               documentId: docId,
               versions: [],
-              _softDeletedAt: entry._softDeletedAt, // Use the latest deletion time for sorting
+              [softDeleteFields.deletedAt]: entry[softDeleteFields.deletedAt], // Use the latest deletion time for sorting
             });
           }
           groupedEntries.get(docId).versions.push({
             ...entry,
-            status: entry.publishedAt ? 'published' : 'draft',
+            status: entry.published_at ? 'published' : 'draft',
           });
         });
 
         // Convert to array and sort by deletion time
         const groupedArray = Array.from(groupedEntries.values()).sort(
-          (a, b) => new Date(b._softDeletedAt).getTime() - new Date(a._softDeletedAt).getTime()
+          (a, b) =>
+            new Date(b[softDeleteFields.deletedAt]).getTime() -
+            new Date(a[softDeleteFields.deletedAt]).getTime()
         );
 
         ctx.body = { entries: groupedArray, grouped: true };
@@ -111,11 +115,13 @@ const admin = ({ strapi }: { strapi: Core.Strapi }) => ({
       // Check if this content type supports draft/publish
       const contentType = strapi.contentTypes[uid];
       const supportsDraftPublish = contentType?.options?.draftAndPublish;
+      const tableName = contentType.collectionName || contentType.info.singularName;
+      const softDeleteFields = getSoftDeleteFields();
 
       const restoreData = {
-        _softDeletedAt: null,
-        _softDeletedById: null,
-        _softDeletedByType: null,
+        [softDeleteFields.deletedAt]: null,
+        [softDeleteFields.deletedById]: null,
+        [softDeleteFields.deletedByType]: null,
       };
 
       let restoredEntries = [];
@@ -124,54 +130,41 @@ const admin = ({ strapi }: { strapi: Core.Strapi }) => ({
         // For draft/publish content types, treat the id as documentId and restore all versions
         const documentId = id;
 
-        // Find all entries with this documentId that are soft deleted
-        const entriesToRestore = await strapi.db.query(uid).findMany({
-          where: {
-            $and: [{ documentId }, { _softDeletedAt: { $notNull: true } }],
-          },
-        });
+        // Find all entries with this documentId that are soft deleted using raw SQL
+        const knex = strapi.db.connection;
+        const entriesToRestore = await knex(tableName)
+          .where('document_id', documentId)
+          .whereNotNull(softDeleteFields.deletedAt);
 
         if (entriesToRestore.length === 0) {
           return ctx.throw(404, 'No soft deleted entries found for this document');
         }
 
-        // Restore all versions using document service
+        // Restore all versions using direct database update
         for (const entry of entriesToRestore) {
           try {
-            const status = entry.publishedAt ? 'published' : 'draft';
-            const restoredEntry = await (strapi.documents(uid) as any).update({
-              documentId,
-              status,
-              data: restoreData,
-            });
-            restoredEntries.push({ ...restoredEntry, status });
-          } catch (error) {
-            console.log(
-              `Error restoring ${entry.publishedAt ? 'published' : 'draft'} version:`,
-              error
-            );
+            // Update directly in the database to avoid schema validation
+            await knex(tableName).where('id', entry.id).update(restoreData);
 
-            // Fallback to database query for this specific entry
-            try {
-              const fallbackEntry = await strapi.db.query(uid).update({
-                where: { id: entry.id },
-                data: restoreData,
-              });
-              restoredEntries.push({
-                ...fallbackEntry,
-                status: entry.publishedAt ? 'published' : 'draft',
-              });
-            } catch (fallbackError) {
-              console.error(`Failed to restore entry ${entry.id}:`, fallbackError);
-            }
+            // Fetch the updated entry
+            const updatedEntry = await knex(tableName).where('id', entry.id).first();
+
+            restoredEntries.push({
+              ...updatedEntry,
+              status: entry.publishedAt ? 'published' : 'draft',
+            });
+          } catch (error) {
+            console.error(`Failed to restore entry ${entry.id}:`, error);
           }
         }
       } else {
-        // For non-draft/publish content types, use the original approach with actual entry id
-        const restoredEntry = await strapi.db.query(uid).update({
-          where: { id },
-          data: restoreData,
-        });
+        // For non-draft/publish content types, use direct database update
+        const knex = strapi.db.connection;
+
+        await knex(tableName).where('id', id).update(restoreData);
+
+        const restoredEntry = await knex(tableName).where('id', id).first();
+
         restoredEntries.push(restoredEntry);
       }
 
@@ -205,6 +198,8 @@ const admin = ({ strapi }: { strapi: Core.Strapi }) => ({
       // Check if this content type supports draft/publish
       const contentType = strapi.contentTypes[uid];
       const supportsDraftPublish = contentType?.options?.draftAndPublish;
+      const tableName = contentType.collectionName || contentType.info.singularName;
+      const softDeleteFields = getSoftDeleteFields();
 
       let deletedCount = 0;
 
@@ -212,30 +207,26 @@ const admin = ({ strapi }: { strapi: Core.Strapi }) => ({
         // For draft/publish content types, treat the id as documentId and delete all versions
         const documentId = id;
 
-        // Find all entries with this documentId that are soft deleted
-        const entriesToDelete = await strapi.db.query(uid).findMany({
-          where: {
-            $and: [{ documentId }, { _softDeletedAt: { $notNull: true } }],
-          },
-        });
+        // Find all entries with this documentId that are soft deleted using raw SQL
+        const knex = strapi.db.connection;
+        const entriesToDelete = await knex(tableName)
+          .where('document_id', documentId)
+          .whereNotNull(softDeleteFields.deletedAt);
 
         if (entriesToDelete.length === 0) {
           return ctx.throw(404, 'No soft deleted entries found for this document');
         }
 
-        // Delete all versions
+        // Delete all versions using direct database delete
         for (const entry of entriesToDelete) {
-          await strapi.db.query(uid).delete({
-            where: { id: entry.id },
-          });
+          await knex(tableName).where('id', entry.id).delete();
           deletedCount++;
         }
       } else {
-        // For non-draft/publish content types, use the original approach with actual entry id
-        await strapi.db.query(uid).delete({
-          where: { id },
-        });
-        deletedCount = 1;
+        // For non-draft/publish content types, use direct database delete
+        const knex = strapi.db.connection;
+        const deletedRows = await knex(tableName).where('id', id).delete();
+        deletedCount = deletedRows;
       }
 
       ctx.body = {

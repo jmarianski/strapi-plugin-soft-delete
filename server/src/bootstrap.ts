@@ -1,6 +1,12 @@
 import type { Core } from '@strapi/strapi';
 import { pluginId, supportsContentType } from './utils/plugin';
 import { getSoftDeletedByAuth, eventHubEmit } from './utils';
+import {
+  ensureSoftDeleteColumns,
+  hasSoftDeleteColumns,
+  getSoftDeleteFields,
+} from './utils/database';
+import { setupQueryInterceptor } from './utils/query-interceptor';
 import * as SoftDeleteStatus from './utils/soft-delete-status';
 
 interface PluginSettings {
@@ -10,6 +16,20 @@ interface PluginSettings {
 
 const bootstrap = ({ strapi }: { strapi: Core.Strapi }) => {
   console.log('Soft Delete plugin bootstrap started');
+
+  // Setup Database Schema and Query Interceptor
+  const setupDatabaseSchema = async () => {
+    try {
+      await ensureSoftDeleteColumns(strapi);
+      console.log('[SOFT DELETE] Database schema setup completed');
+      
+      // Setup automatic query filtering after database columns are ready
+      await setupQueryInterceptor(strapi);
+      console.log('[SOFT DELETE] Query interceptor setup completed');
+    } catch (error) {
+      console.error('[SOFT DELETE] Database setup failed:', error);
+    }
+  };
   // Setup Plugin Settings
   const setupPluginSettings = async () => {
     const pluginStore = strapi.store({
@@ -106,6 +126,15 @@ const bootstrap = ({ strapi }: { strapi: Core.Strapi }) => {
           }
 
           try {
+            // Check if this content type has soft delete columns
+            const hasColumns = await hasSoftDeleteColumns(strapi, uid);
+            if (!hasColumns) {
+              console.log(
+                `[SOFT DELETE] No soft delete columns found for ${uid}, proceeding with hard delete`
+              );
+              return next();
+            }
+
             // Ensure the entity exists
             const entity = await strapi.documents(uid).findOne({ documentId });
 
@@ -117,55 +146,39 @@ const bootstrap = ({ strapi }: { strapi: Core.Strapi }) => {
             const ctx = strapi.requestContext.get();
             const { id: authId, strategy: authStrategy } = getSoftDeletedByAuth(ctx?.state?.auth);
 
+            // Use camelCase field names to match existing codebase
+            const fields = getSoftDeleteFields();
             const softDeleteData = {
-              _softDeletedAt: new Date().toISOString(),
-              _softDeletedById: authId,
-              _softDeletedByType: authStrategy,
+              [fields.deletedAt]: new Date().toISOString(),
+              [fields.deletedById]: authId,
+              [fields.deletedByType]: authStrategy,
             };
 
             // Check if this content type supports draft/publish
             const contentType = strapi.contentTypes[uid];
             const supportsDraftPublish = contentType?.options?.draftAndPublish;
+            const tableName = contentType.collectionName || contentType.info.singularName;
 
             let softDeletedEntity;
 
             if (supportsDraftPublish) {
               // For draft/publish content types, we need to soft-delete both versions
-              
-              // First, check if there's a published version
-              let publishedEntity = null;
-              try {
-                publishedEntity = await strapi.documents(uid).findOne({ 
-                  documentId,
-                  status: 'published'
-                });
-              } catch (e) {
-                // Published version might not exist
-              }
+              // Use raw SQL to avoid schema validation issues
+              const knex = strapi.db.connection;
 
-              // Soft-delete the draft version
-              const draftEntity = await (strapi.documents(uid) as any).update({
-                documentId,
-                status: 'draft',
-                data: softDeleteData,
-              });
+              // Update both draft and published versions
+              await knex(tableName).where('document_id', documentId).update(softDeleteData);
 
-              // If published version exists, soft-delete it too
-              if (publishedEntity) {
-                await (strapi.documents(uid) as any).update({
-                  documentId,
-                  status: 'published',
-                  data: softDeleteData,
-                });
-              }
-
-              softDeletedEntity = draftEntity;
+              // Get the updated entity to return (use entity service since we're just reading)
+              softDeletedEntity = await strapi.documents(uid).findOne({ documentId });
             } else {
-              // For non-draft/publish content types, update normally
-              softDeletedEntity = await (strapi.documents(uid) as any).update({
-                documentId,
-                data: softDeleteData,
-              });
+              // For non-draft/publish content types, use raw SQL update
+              const knex = strapi.db.connection;
+
+              await knex(tableName).where('document_id', documentId).update(softDeleteData);
+
+              // Get the updated entity to return
+              softDeletedEntity = await strapi.documents(uid).findOne({ documentId });
             }
 
             // Emit soft delete event
@@ -181,41 +194,15 @@ const bootstrap = ({ strapi }: { strapi: Core.Strapi }) => {
             return; // Don't call next() to prevent actual deletion
           } catch (error) {
             console.error('Soft delete failed:', error);
-            // If soft delete fails, proceed with original delete
-            return next();
+            // If soft delete fails, DONT proceed with original delete
+            //return next();
+            return;
           }
         }
 
-        // Handle find operations - filter based on soft delete status
+        // Handle find operations - now we have automatic filtering via query interceptor!
         if (['findOne', 'findMany', 'findFirst'].includes(action) && supportsContentType(uid)) {
-          // Only proceed if this content type actually has soft delete fields
-          if (!SoftDeleteStatus.hasSoftDeleteFields(uid, strapi)) {
-            console.log(`[SOFT DELETE] Skipping ${uid} - no soft delete fields in schema`);
-            return next();
-          }
-
-          // Apply status-based filtering using our utility functions
-          const contentType = strapi.contentTypes[uid];
-          context.params = SoftDeleteStatus.statusToFilters(contentType, context.params);
-
-          // Handle populated fields with status-aware filtering
-          if (context.params.populate) {
-            context.params.populate = SoftDeleteStatus.addSoftDeleteToPopulate(
-              context.params.populate,
-              uid,
-              context.params.status || 'published',
-              strapi
-            );
-
-            console.log(
-              `[SOFT DELETE] Applied soft delete status filter (${context.params.status || 'published'}) to populate for ${uid}:`,
-              JSON.stringify(context.params.populate, null, 2)
-            );
-            console.log(
-              '[SOFT DELETE] Current filters:',
-              JSON.stringify(context.params.filters, null, 2)
-            );
-          }
+          console.log(`[SOFT DELETE] Find operation for ${uid} - automatic filtering active via query interceptor`);
         }
 
         // Continue with the operation
@@ -228,6 +215,9 @@ const bootstrap = ({ strapi }: { strapi: Core.Strapi }) => {
   setupPluginSettings();
   setupPermissions();
   setupEntityServiceDecoration();
+
+  // Setup database schema after everything else is ready
+  setupDatabaseSchema();
 };
 
 export default bootstrap;
