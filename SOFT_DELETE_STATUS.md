@@ -6,17 +6,17 @@ This plugin now implements a status-based filtering system similar to Strapi's d
 
 The plugin supports three status values:
 
-- **`active`** (default): Shows only active (non-deleted) content
+- **`published`** (default): Shows only active (non-deleted) content
 - **`deleted`**: Shows only soft-deleted content  
 - **`all`**: Shows all content regardless of deletion status
 
 ## Usage Examples
 
-### 1. Default Behavior (Active Content Only)
+### 1. Default Behavior (Published Content Only)
 ```javascript
-// These are equivalent - both show only active content
-const activeArticles1 = await strapi.documents('api::article.article').findMany();
-const activeArticles2 = await strapi.documents('api::article.article').findMany({ status: 'active' });
+// These are equivalent - both show only published content
+const publishedArticles1 = await strapi.documents('api::article.article').findMany();
+const publishedArticles2 = await strapi.documents('api::article.article').findMany({ status: 'published' });
 ```
 
 ### 2. Show Only Deleted Content
@@ -27,9 +27,9 @@ const deletedArticles = await strapi.documents('api::article.article').findMany(
 });
 ```
 
-### 3. Show All Content (Active + Deleted)
+### 3. Show All Content (Published + Deleted)
 ```javascript
-// Show both active and deleted articles
+// Show both published and deleted articles
 const allArticles = await strapi.documents('api::article.article').findMany({ 
   status: 'all' 
 });
@@ -45,9 +45,9 @@ const deletedByAuthor = await strapi.documents('api::article.article').findMany(
   }
 });
 
-// Find active articles with title containing "test"
-const activeTestArticles = await strapi.documents('api::article.article').findMany({
-  status: 'active', // Can be omitted since it's default
+// Find published articles with title containing "test"
+const publishedTestArticles = await strapi.documents('api::article.article').findMany({
+  status: 'published', // Can be omitted since it's default
   filters: {
     title: { $contains: 'test' }
   }
@@ -160,7 +160,7 @@ strapi.documents.use(async (context: any, next) => {
       context.params.populate = SoftDeleteStatus.addSoftDeleteToPopulate(
         context.params.populate,
         uid,
-        context.params.status || 'active',
+        context.params.status || 'published',
         strapi
       );
     }
@@ -174,11 +174,41 @@ strapi.documents.use(async (context: any, next) => {
 
 | Strapi Draft/Publish | Soft Delete Plugin |
 |---------------------|-------------------|
-| `status: 'draft'` | `status: 'active'` |
+| `status: 'draft'` | `status: 'published'` |
 | `status: 'published'` | `status: 'deleted'` |
 | `publishedAt: null` | `_softDeletedAt: null` |
 | `publishedAt: { $notNull: true }` | `_softDeletedAt: { $notNull: true }` |
-| Shows drafts by default | Shows active by default |
-| Two states: draft/published | Three states: active/deleted/all |
+| Shows published by default | Shows published by default |
+| Two states: draft/published | Three states: published/deleted/all |
+
+## Update Behavior
+
+The plugin mirrors Strapi's draft/publish update behavior:
+
+### Normal Updates (status: 'published' or undefined)
+When updating content normally, the plugin:
+1. **If only published version exists**: Updates the published version
+2. **If only deleted version exists**: Updates the deleted version  
+3. **If both versions exist**: Updates both versions (mimicking how Strapi updates both draft and published)
+
+### Targeted Updates (status: 'deleted')
+When explicitly updating deleted content:
+- **Only updates the soft-deleted version**, regardless of whether a published version exists
+
+### Example Update Scenarios
+```javascript
+// Normal update - will update both published and deleted versions if they exist
+await strapi.documents('api::article.article').update({
+  documentId: 'article-123',
+  data: { title: 'Updated Title' }
+});
+
+// Targeted update - only updates the deleted version
+await strapi.documents('api::article.article').update({
+  documentId: 'article-123',
+  status: 'deleted',
+  data: { title: 'Updated Deleted Title' }
+});
+```
 
 This approach provides a clean, intuitive API that follows Strapi's existing patterns while providing powerful soft delete functionality.

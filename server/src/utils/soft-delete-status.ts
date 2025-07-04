@@ -7,10 +7,10 @@ type ParamsTransform = (params: any) => any;
 type TransformWithContentType = (contentType: any, params: any) => any;
 
 /**
- * Soft Delete enabled -> set status to active by default
+ * Soft Delete enabled -> set status to published by default
  * Soft Delete disabled -> Used mostly for parsing relations, so there is not a need for a default.
  */
-const setStatusToActive: TransformWithContentType = (contentType, params) => {
+const setStatusToPublished: TransformWithContentType = (contentType, params) => {
   if (!supportsContentType(contentType.uid) && params.status) {
     return params;
   }
@@ -19,10 +19,10 @@ const setStatusToActive: TransformWithContentType = (contentType, params) => {
 };
 
 /**
- * Adds a default status of `active` to the params
+ * Adds a default status of `published` to the params
  */
-const defaultToActive: ParamsTransform = (params) => {
-  // Default to active if no status is provided or it's invalid
+const defaultToPublished: ParamsTransform = (params) => {
+  // Default to published if no status is provided or it's invalid
   if (!params.status || !['published', 'deleted', 'all'].includes(params.status)) {
     return assoc('status', 'published', params);
   }
@@ -32,16 +32,16 @@ const defaultToActive: ParamsTransform = (params) => {
 
 /**
  * Soft Delete disabled -> ignore status
- * Soft Delete enabled -> set status to active if no status is provided or it's invalid
+ * Soft Delete enabled -> set status to published if no status is provided or it's invalid
  */
 const defaultStatus: TransformWithContentType = (contentType, params) => {
   if (!supportsContentType(contentType.uid)) {
     return params;
   }
 
-  // Default to active if no status is provided or it's invalid
+  // Default to published if no status is provided or it's invalid
   if (!params.status || !['published', 'deleted', 'all'].includes(params.status)) {
-    return defaultToActive(params);
+    return defaultToPublished(params);
   }
 
   return params;
@@ -103,7 +103,7 @@ const statusToFilters: TransformWithContentType = (contentType, params) => {
       // Don't add any soft delete filters
       return params;
     default:
-      // Default to active
+      // Default to published
       return assoc(
         ['filters'],
         filters && Object.keys(filters).length > 0
@@ -195,7 +195,7 @@ const addSoftDeleteToPopulate = (
               ? { $and: [relationFilters, { _softDeletedAt: { $notNull: true } }] }
               : { _softDeletedAt: { $notNull: true } };
           } else if (currentStatus === 'published' || !currentStatus) {
-            // Show only active related items (default behavior)
+            // Show only published related items (default behavior)
             relationFilters = relationFilters
               ? { $and: [relationFilters, { _softDeletedAt: { $null: true } }] }
               : { _softDeletedAt: { $null: true } };
@@ -229,15 +229,15 @@ const addSoftDeleteToPopulate = (
 };
 
 // Curry the functions for easier use
-const setStatusToActiveCurry = curry(setStatusToActive);
-const defaultToActiveCurry = curry(defaultToActive);
+const setStatusToPublishedCurry = curry(setStatusToPublished);
+const defaultToPublishedCurry = curry(defaultToPublished);
 const defaultStatusCurry = curry(defaultStatus);
 const statusToLookupCurry = curry(statusToLookup);
 const statusToFiltersCurry = curry(statusToFilters);
 
 export {
-  setStatusToActiveCurry as setStatusToActive,
-  defaultToActiveCurry as defaultToActive,
+  setStatusToPublishedCurry as setStatusToPublished,
+  defaultToPublishedCurry as defaultToPublished,
   defaultStatusCurry as defaultStatus,
   statusToLookupCurry as statusToLookup,
   statusToFiltersCurry as statusToFilters,
