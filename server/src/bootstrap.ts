@@ -117,15 +117,56 @@ const bootstrap = ({ strapi }: { strapi: Core.Strapi }) => {
             const ctx = strapi.requestContext.get();
             const { id: authId, strategy: authStrategy } = getSoftDeletedByAuth(ctx?.state?.auth);
 
-            // Instead of deleting, update the entity to mark it as soft-deleted
-            const softDeletedEntity = await (strapi.documents(uid) as any).update({
-              documentId,
-              data: {
-                _softDeletedAt: new Date().toISOString(),
-                _softDeletedById: authId,
-                _softDeletedByType: authStrategy,
-              },
-            });
+            const softDeleteData = {
+              _softDeletedAt: new Date().toISOString(),
+              _softDeletedById: authId,
+              _softDeletedByType: authStrategy,
+            };
+
+            // Check if this content type supports draft/publish
+            const contentType = strapi.contentTypes[uid];
+            const supportsDraftPublish = contentType?.options?.draftAndPublish;
+
+            let softDeletedEntity;
+
+            if (supportsDraftPublish) {
+              // For draft/publish content types, we need to soft-delete both versions
+              
+              // First, check if there's a published version
+              let publishedEntity = null;
+              try {
+                publishedEntity = await strapi.documents(uid).findOne({ 
+                  documentId,
+                  status: 'published'
+                });
+              } catch (e) {
+                // Published version might not exist
+              }
+
+              // Soft-delete the draft version
+              const draftEntity = await (strapi.documents(uid) as any).update({
+                documentId,
+                status: 'draft',
+                data: softDeleteData,
+              });
+
+              // If published version exists, soft-delete it too
+              if (publishedEntity) {
+                await (strapi.documents(uid) as any).update({
+                  documentId,
+                  status: 'published',
+                  data: softDeleteData,
+                });
+              }
+
+              softDeletedEntity = draftEntity;
+            } else {
+              // For non-draft/publish content types, update normally
+              softDeletedEntity = await (strapi.documents(uid) as any).update({
+                documentId,
+                data: softDeleteData,
+              });
+            }
 
             // Emit soft delete event
             eventHubEmit({
@@ -135,10 +176,11 @@ const bootstrap = ({ strapi }: { strapi: Core.Strapi }) => {
               entity: softDeletedEntity,
             });
 
-            // Return the soft deleted entity instead of proceeding with actual delete
+            // Return the soft deleted entity instead of proceeding with actual deletion
             context.result = softDeletedEntity;
             return; // Don't call next() to prevent actual deletion
           } catch (error) {
+            console.error('Soft delete failed:', error);
             // If soft delete fails, proceed with original delete
             return next();
           }

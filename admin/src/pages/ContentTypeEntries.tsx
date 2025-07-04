@@ -8,15 +8,25 @@ import { format } from 'date-fns';
 
 interface Entry {
   id: number;
+  documentId?: string;
+  publishedAt?: string;
+  status?: string;
   [key: string]: any;
   _softDeletedAt: string;
   _softDeletedById: number;
   _softDeletedByType: string;
 }
 
+interface GroupedEntry {
+  documentId: string;
+  versions: Entry[];
+  _softDeletedAt: string;
+}
+
 export const ContentTypeEntries = () => {
   const { uid } = useParams<{ uid: string }>();
-  const [entries, setEntries] = useState<Entry[]>([]);
+  const [entries, setEntries] = useState<Entry[] | GroupedEntry[]>([]);
+  const [isGrouped, setIsGrouped] = useState(false);
   const [loading, setLoading] = useState(true);
   const { get, put, del } = useFetchClient();
 
@@ -25,6 +35,7 @@ export const ContentTypeEntries = () => {
       setLoading(true);
       const { data } = await get(`/${PLUGIN_ID}/content-types/${uid}/entries`);
       setEntries(data.entries || []);
+      setIsGrouped(data.grouped || false);
     } catch (error) {
       console.error('Failed to fetch entries:', error);
     } finally {
@@ -38,16 +49,20 @@ export const ContentTypeEntries = () => {
     }
   }, [uid]);
 
-  const handleRestore = async (entryId: number) => {
+  const handleRestore = async (entryId: number | string) => {
     try {
-      await put(`/${PLUGIN_ID}/content-types/${uid}/entries/${entryId}/restore`);
+      const response = await put(`/${PLUGIN_ID}/content-types/${uid}/entries/${entryId}/restore`);
+
+      // Show success message
+      console.log('Entry restored successfully:', response.data);
+
       fetchEntries();
     } catch (error) {
       console.error('Failed to restore entry:', error);
     }
   };
 
-  const handleDeletePermanently = async (entryId: number) => {
+  const handleDeletePermanently = async (entryId: number | string) => {
     if (
       window.confirm(
         'Are you sure you want to permanently delete this entry? This action cannot be undone.'
@@ -62,6 +77,100 @@ export const ContentTypeEntries = () => {
     }
   };
 
+  const renderGroupedEntry = (groupedEntry: GroupedEntry) => (
+    <Box
+      key={groupedEntry.documentId}
+      padding={4}
+      background="neutral100"
+      borderRadius="4px"
+      marginBottom={3}
+    >
+      <Flex justifyContent="space-between" alignItems="center" gap={2}>
+        <Flex gap={2}>
+          <Typography variant="beta">Document ID: {groupedEntry.documentId}</Typography>
+          <Typography variant="epsilon" textColor="neutral600">
+            Versions: {groupedEntry.versions.map((v) => v.status).join(', ')}
+          </Typography>
+          <Typography variant="epsilon" textColor="neutral600">
+            Deleted: {format(new Date(groupedEntry._softDeletedAt), 'PPpp')}
+          </Typography>
+          {groupedEntry.versions.map((version, index) => (
+            <Typography key={index} variant="pi" textColor="neutral500">
+              {version.status}: ID {version.id}
+            </Typography>
+          ))}
+        </Flex>
+        <Flex gap={2}>
+          <Button
+            size="S"
+            startIcon={<ArrowClockwise />}
+            variant="secondary"
+            onClick={() => handleRestore(groupedEntry.documentId)}
+            title="Restore all versions of this document"
+          >
+            Restore All
+          </Button>
+          <Button
+            size="S"
+            startIcon={<Trash />}
+            variant="danger-light"
+            onClick={() => handleDeletePermanently(groupedEntry.documentId)}
+          >
+            Delete Permanently
+          </Button>
+        </Flex>
+      </Flex>
+    </Box>
+  );
+
+  const renderSingleEntry = (entry: Entry) => (
+    <Box key={entry.id} padding={4} background="neutral100" borderRadius="4px" marginBottom={3}>
+      <Flex justifyContent="space-between" alignItems="center">
+        <Flex gap={2}>
+          <Typography variant="beta">
+            ID: {entry.id}
+            {entry.documentId && entry.documentId !== String(entry.id) && (
+              <Typography variant="pi" textColor="neutral500">
+                {' '}
+                (Document: {entry.documentId})
+              </Typography>
+            )}
+          </Typography>
+          {entry.publishedAt && (
+            <Typography variant="pi" textColor="primary600">
+              Published Content
+            </Typography>
+          )}
+          <Typography variant="epsilon" textColor="neutral600">
+            Deleted: {entry._softDeletedAt ? format(new Date(entry._softDeletedAt), 'PPpp') : ''}
+          </Typography>
+          <Typography variant="epsilon" textColor="neutral600">
+            By: {entry._softDeletedByType}
+          </Typography>
+        </Flex>
+        <Flex gap={2}>
+          <Button
+            size="S"
+            startIcon={<ArrowClockwise />}
+            variant="secondary"
+            onClick={() => handleRestore(entry.id)}
+            title="Restore this entry"
+          >
+            Restore
+          </Button>
+          <Button
+            size="S"
+            startIcon={<Trash />}
+            variant="danger-light"
+            onClick={() => handleDeletePermanently(entry.id)}
+          >
+            Delete Permanently
+          </Button>
+        </Flex>
+      </Flex>
+    </Box>
+  );
+
   if (!uid) {
     return (
       <Main>
@@ -75,7 +184,15 @@ export const ContentTypeEntries = () => {
   return (
     <Main>
       <Box padding={8}>
-        <Typography variant="alpha">Soft Deleted Entries - {uid}</Typography>
+        <Typography variant="alpha">
+          Soft Deleted Entries - {uid}
+          {isGrouped && (
+            <Typography variant="epsilon" textColor="neutral600">
+              {' '}
+              (Grouped by Document)
+            </Typography>
+          )}
+        </Typography>
 
         <Box paddingTop={6}>
           {loading ? (
@@ -84,46 +201,13 @@ export const ContentTypeEntries = () => {
             <Typography>No soft deleted entries found.</Typography>
           ) : (
             <Box>
-              {entries.map((entry) => (
-                <Box
-                  key={entry.id}
-                  padding={4}
-                  background="neutral100"
-                  borderRadius="4px"
-                  marginBottom={3}
-                >
-                  <Flex justifyContent="space-between" alignItems="center">
-                    <Box>
-                      <Typography variant="beta">ID: {entry.id}</Typography>
-                      <Typography variant="epsilon" textColor="neutral600">
-                        Deleted:{' '}
-                        {entry._softDeletedAt ? format(new Date(entry._softDeletedAt), 'PPpp') : ''}
-                      </Typography>
-                      <Typography variant="epsilon" textColor="neutral600">
-                        By: {entry._softDeletedByType}
-                      </Typography>
-                    </Box>
-                    <Flex gap={2}>
-                      <Button
-                        size="S"
-                        startIcon={<ArrowClockwise />}
-                        variant="secondary"
-                        onClick={() => handleRestore(entry.id)}
-                      >
-                        Restore
-                      </Button>
-                      <Button
-                        size="S"
-                        startIcon={<Trash />}
-                        variant="danger-light"
-                        onClick={() => handleDeletePermanently(entry.id)}
-                      >
-                        Delete Permanently
-                      </Button>
-                    </Flex>
-                  </Flex>
-                </Box>
-              ))}
+              {isGrouped
+                ? // Render grouped entries (draft/publish content types)
+                  (entries as GroupedEntry[]).map((groupedEntry) =>
+                    renderGroupedEntry(groupedEntry)
+                  )
+                : // Render individual entries (non-draft/publish content types)
+                  (entries as Entry[]).map((entry) => renderSingleEntry(entry))}
             </Box>
           )}
         </Box>
