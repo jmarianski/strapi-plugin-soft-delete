@@ -1,6 +1,7 @@
 import type { Core } from '@strapi/strapi';
 import { pluginId, supportsContentType } from './utils/plugin';
 import { getSoftDeletedByAuth, eventHubEmit } from './utils';
+import * as SoftDeleteStatus from './utils/soft-delete-status';
 
 interface PluginSettings {
   singleTypesRestorationBehavior?: string;
@@ -143,15 +144,36 @@ const bootstrap = ({ strapi }: { strapi: Core.Strapi }) => {
           }
         }
 
-        // Handle find operations - filter out soft-deleted entries
+        // Handle find operations - filter based on soft delete status
         if (['findOne', 'findMany', 'findFirst'].includes(action) && supportsContentType(uid)) {
-          // Add filter to exclude soft-deleted entries
-          if (!context.params.filters) {
-            context.params.filters = {};
+          // Only proceed if this content type actually has soft delete fields
+          if (!SoftDeleteStatus.hasSoftDeleteFields(uid, strapi)) {
+            console.log(`[SOFT DELETE] Skipping ${uid} - no soft delete fields in schema`);
+            return next();
           }
 
-          // Simple null check - should work for both null and undefined values
-          context.params.filters._softDeletedAt = { $null: true };
+          // Apply status-based filtering using our utility functions
+          const contentType = strapi.contentTypes[uid];
+          context.params = SoftDeleteStatus.statusToFilters(contentType, context.params);
+
+          // Handle populated fields with status-aware filtering
+          if (context.params.populate) {
+            context.params.populate = SoftDeleteStatus.addSoftDeleteToPopulate(
+              context.params.populate,
+              uid,
+              context.params.status || 'published',
+              strapi
+            );
+
+            console.log(
+              `[SOFT DELETE] Applied soft delete status filter (${context.params.status || 'published'}) to populate for ${uid}:`,
+              JSON.stringify(context.params.populate, null, 2)
+            );
+            console.log(
+              '[SOFT DELETE] Current filters:',
+              JSON.stringify(context.params.filters, null, 2)
+            );
+          }
         }
 
         // Continue with the operation
